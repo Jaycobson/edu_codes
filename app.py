@@ -172,7 +172,7 @@ def main():
     # Compact Header
     st.markdown("""
     <div style='text-align: center; margin-bottom: 1rem;'>
-        <h1>🧠 QuizMaster Pro</h1>
+        <h1> 🎯 QuizMaster </h1>
         <p style='margin: 0; color: #666;'><strong>AI-Powered Interactive Quiz Generation</strong> | <em>Created by jaycobson</em></p>
     </div>
     """, unsafe_allow_html=True)
