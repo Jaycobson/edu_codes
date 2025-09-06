@@ -70,26 +70,42 @@ def get_answer_value(answer, key_options):
 def generate_questions_safely(llm_service, topic, num_questions):
     """Safely generate questions with fallback for different method signatures"""
     try:
-        # First, try with keyword arguments (preferred method)
+        # Method 1: Try with keyword arguments (preferred method)
         return llm_service.generate_quiz_questions(topic=topic, num_questions=num_questions)
     except TypeError as e:
         if "unexpected keyword argument" in str(e):
             try:
-                # Fallback: try with positional arguments
+                # Method 2: Try with positional arguments
                 return llm_service.generate_quiz_questions(topic, num_questions)
-            except TypeError:
-                try:
-                    # Final fallback: try with just topic (use default num_questions)
-                    st.warning(f"Using default number of questions instead of {num_questions}")
-                    return llm_service.generate_quiz_questions(topic)
-                except Exception as final_e:
-                    st.error(f"All methods failed. Final error: {final_e}")
-                    return None
+            except TypeError as e2:
+                # Check what parameters the method actually accepts
+                import inspect
+                sig = inspect.signature(llm_service.generate_quiz_questions)
+                params = list(sig.parameters.keys())
+                
+                if len(params) == 1:
+                    # Method only accepts topic, generate with topic only then truncate/extend
+                    st.warning(f"⚠️ LLM Service only accepts topic parameter. Requesting {num_questions} questions but may get default amount.")
+                    questions = llm_service.generate_quiz_questions(topic)
+                    
+                    if questions and len(questions) != num_questions:
+                        if len(questions) > num_questions:
+                            # Truncate to requested number
+                            st.info(f"📝 Truncated to {num_questions} questions as requested.")
+                            return questions[:num_questions]
+                        else:
+                            # We got fewer questions than requested
+                            st.warning(f"⚠️ Only {len(questions)} questions generated (requested {num_questions}).")
+                            return questions
+                    return questions
+                else:
+                    # Re-raise the error if we can't handle it
+                    raise e2
         else:
             # Re-raise if it's a different TypeError
             raise e
     except Exception as e:
-        st.error(f"Unexpected error: {e}")
+        st.error(f"❌ Unexpected error generating questions: {e}")
         return None
 
 def clear_cache_and_restart():
@@ -97,10 +113,44 @@ def clear_cache_and_restart():
     st.cache_resource.clear()
     st.rerun()
 
+def generate_questions_with_retry(llm_service, topic, num_questions, max_retries=3):
+    """Generate questions with retry logic and better error handling"""
+    for attempt in range(max_retries):
+        try:
+            questions = generate_questions_safely(llm_service, topic, num_questions)
+            
+            if questions:
+                # Validate we got the right number of questions
+                if len(questions) == num_questions:
+                    return questions
+                elif len(questions) > num_questions:
+                    st.info(f"📝 Generated {len(questions)} questions, using first {num_questions} as requested.")
+                    return questions[:num_questions]
+                else:
+                    st.warning(f"⚠️ Generated {len(questions)} questions (requested {num_questions}). Using what was generated.")
+                    return questions
+            else:
+                if attempt < max_retries - 1:
+                    st.warning(f"⚠️ Attempt {attempt + 1} failed, retrying...")
+                    continue
+                else:
+                    st.error("❌ Failed to generate questions after multiple attempts.")
+                    return None
+                    
+        except Exception as e:
+            if attempt < max_retries - 1:
+                st.warning(f"⚠️ Attempt {attempt + 1} failed: {str(e)}. Retrying...")
+                continue
+            else:
+                st.error(f"❌ Failed to generate questions after {max_retries} attempts: {str(e)}")
+                return None
+    
+    return None
+
 def main():
     # Configure page
     st.set_page_config(
-        page_title="QuizMaster Pro | jaycobson",
+        page_title="QuizMaster by Jaycobson",
         # page_icon="🧠",
         # layout="wide",
         # initial_sidebar_state="expanded"
@@ -192,10 +242,10 @@ def main():
                 help="Be specific but not too narrow! Examples: 'JavaScript Functions', 'Renaissance Art', 'Cell Biology'"
             )
             
-            # Number of questions selector
+            # Number of questions selector - with more options
             st.session_state.num_questions = st.selectbox(
                 "Number of questions:",
-                options=[3, 5, 7, 10, 15],
+                options=[3, 5, 7, 10, 15, 20, 25, 30],
                 index=1,  # Default to 5 questions
                 help="Choose how many questions you want in your quiz"
             )
@@ -213,19 +263,19 @@ def main():
                                 st.error("❌ LLM Service not properly initialized. Please restart the app.")
                                 st.stop()
                             
-                            # Use the safe generation function
-                            questions_data = generate_questions_safely(
+                            # Use the improved generation function with retry logic
+                            questions_data = generate_questions_with_retry(
                                 llm_service, 
                                 st.session_state.current_topic, 
                                 st.session_state.num_questions
                             )
                             
-                            if questions_data:
+                            if questions_data and len(questions_data) > 0:
                                 quiz_manager.load_questions(questions_data)
                                 st.session_state.quiz_started = True
                                 reset_quiz_state()
                                 st.session_state.quiz_started = True  # Set back to True
-                                st.success("✨ Questions generated successfully!")
+                                st.success(f"✨ {len(questions_data)} questions generated successfully!")
                                 st.rerun()
                             else:
                                 st.error("❌ Failed to generate questions. Please try a different topic or check your connection.")
@@ -256,16 +306,16 @@ def main():
                         if st.button(f"{icon} {topic}", use_container_width=True, key=f"topic_{i+j}"):
                             st.session_state.current_topic = topic
                             
-                            with st.spinner(f"🔮 Creating questions about '{topic}'..."):
+                            with st.spinner(f"🔮 Creating {st.session_state.num_questions} questions about '{topic}'..."):
                                 try:
-                                    # Use the safe generation function
-                                    questions_data = generate_questions_safely(
+                                    # Use the improved generation function with retry logic
+                                    questions_data = generate_questions_with_retry(
                                         llm_service, 
                                         topic, 
                                         st.session_state.num_questions
                                     )
                                     
-                                    if questions_data:
+                                    if questions_data and len(questions_data) > 0:
                                         quiz_manager.load_questions(questions_data)
                                         st.session_state.quiz_started = True
                                         reset_quiz_state()
