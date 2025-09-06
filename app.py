@@ -6,6 +6,8 @@ from ui_components import (
     display_score_summary, display_pie_chart
 )
 from file_exporter import export_to_csv, export_to_docx
+import warnings
+warnings.filterwarnings('ignore', message='.*ScriptRunContext.*')
 
 # Initialize services (can be cached for performance)
 @st.cache_resource
